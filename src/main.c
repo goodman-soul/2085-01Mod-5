@@ -384,8 +384,151 @@ static int db_init(void) {
         "CREATE INDEX IF NOT EXISTS idx_movements_created_at ON "
         "stock_movements(created_at);"
 
+        "CREATE TABLE IF NOT EXISTS orders ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  order_no TEXT NOT NULL UNIQUE,"
+        "  total_amount_cents INTEGER NOT NULL CHECK(total_amount_cents >= 0),"
+        "  paid_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(paid_amount_cents >= 0),"
+        "  change_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(change_amount_cents >= 0),"
+        "  status TEXT NOT NULL DEFAULT 'PENDING' "
+        "    CHECK(status IN ('PENDING','PAID','CHANGE_PENDING','COMPLETED','CHANGE_FAILED','CANCELLED')),"
+        "  payment_method TEXT CHECK(payment_method IN ('COIN','BILL','QR_CODE','MIXED')),"
+        "  change_failure_reason TEXT "
+        "    CHECK(change_failure_reason IN ('INSUFFICIENT_CHANGE','COIN_JAM','USER_CANCELLED','MANUAL_REFUND',NULL)),"
+        "  operator_user_id INTEGER,"
+        "  note TEXT,"
+        "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(operator_user_id) REFERENCES users(id)"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS order_items ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  order_id INTEGER NOT NULL,"
+        "  product_id INTEGER NOT NULL,"
+        "  product_name TEXT NOT NULL,"
+        "  quantity INTEGER NOT NULL CHECK(quantity > 0),"
+        "  unit_price_cents INTEGER NOT NULL CHECK(unit_price_cents >= 0),"
+        "  subtotal_cents INTEGER NOT NULL CHECK(subtotal_cents >= 0),"
+        "  FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE,"
+        "  FOREIGN KEY(product_id) REFERENCES products(id)"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS payment_transactions ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  order_id INTEGER,"
+        "  txn_no TEXT NOT NULL UNIQUE,"
+        "  payment_method TEXT NOT NULL "
+        "    CHECK(payment_method IN ('COIN','BILL','QR_CODE')),"
+        "  amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),"
+        "  denomination TEXT,"
+        "  status TEXT NOT NULL DEFAULT 'SUCCESS' "
+        "    CHECK(status IN ('PENDING','SUCCESS','FAILED','REJECTED')),"
+        "  failure_reason TEXT,"
+        "  external_ref TEXT,"
+        "  operator_user_id INTEGER,"
+        "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(order_id) REFERENCES orders(id),"
+        "  FOREIGN KEY(operator_user_id) REFERENCES users(id)"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS change_transactions ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  order_id INTEGER NOT NULL,"
+        "  txn_no TEXT NOT NULL UNIQUE,"
+        "  request_amount_cents INTEGER NOT NULL CHECK(request_amount_cents >= 0),"
+        "  actual_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK(actual_amount_cents >= 0),"
+        "  status TEXT NOT NULL DEFAULT 'PENDING' "
+        "    CHECK(status IN ('PENDING','SUCCESS','FAILED','PARTIAL','CANCELLED','MANUAL_REFUND')),"
+        "  failure_reason TEXT "
+        "    CHECK(failure_reason IN ('INSUFFICIENT_CHANGE','COIN_JAM','USER_CANCELLED','MANUAL_REFUND',NULL)),"
+        "  denomination_breakdown TEXT,"
+        "  operator_user_id INTEGER,"
+        "  note TEXT,"
+        "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(order_id) REFERENCES orders(id),"
+        "  FOREIGN KEY(operator_user_id) REFERENCES users(id)"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS cash_drawer ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  denomination TEXT NOT NULL UNIQUE,"
+        "  denomination_value_cents INTEGER NOT NULL CHECK(denomination_value_cents > 0),"
+        "  quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0),"
+        "  total_value_cents INTEGER NOT NULL DEFAULT 0 CHECK(total_value_cents >= 0),"
+        "  coin_type TEXT NOT NULL CHECK(coin_type IN ('COIN','BILL')),"
+        "  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS cash_drawer_movements ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  denomination TEXT NOT NULL,"
+        "  movement_type TEXT NOT NULL "
+        "    CHECK(movement_type IN ('REFILL','DISPENSE','RECOUNT_ADJUST','MANUAL_ADD','MANUAL_REMOVE')),"
+        "  quantity_before INTEGER NOT NULL,"
+        "  quantity_change INTEGER NOT NULL,"
+        "  quantity_after INTEGER NOT NULL,"
+        "  value_change_cents INTEGER NOT NULL,"
+        "  order_id INTEGER,"
+        "  change_txn_id INTEGER,"
+        "  operator_user_id INTEGER,"
+        "  note TEXT,"
+        "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(order_id) REFERENCES orders(id),"
+        "  FOREIGN KEY(change_txn_id) REFERENCES change_transactions(id),"
+        "  FOREIGN KEY(operator_user_id) REFERENCES users(id)"
+        ");"
+
+        "CREATE TABLE IF NOT EXISTS shift_settlements ("
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  shift_no TEXT NOT NULL UNIQUE,"
+        "  operator_user_id INTEGER NOT NULL,"
+        "  start_time TEXT NOT NULL,"
+        "  end_time TEXT NOT NULL,"
+        "  expected_cash_cents INTEGER NOT NULL DEFAULT 0,"
+        "  actual_cash_cents INTEGER NOT NULL DEFAULT 0,"
+        "  difference_cents INTEGER NOT NULL DEFAULT 0,"
+        "  total_sales_cents INTEGER NOT NULL DEFAULT 0,"
+        "  total_change_cents INTEGER NOT NULL DEFAULT 0,"
+        "  total_qr_sales_cents INTEGER NOT NULL DEFAULT 0,"
+        "  order_count INTEGER NOT NULL DEFAULT 0,"
+        "  change_failure_count INTEGER NOT NULL DEFAULT 0,"
+        "  status TEXT NOT NULL DEFAULT 'COMPLETED' "
+        "    CHECK(status IN ('IN_PROGRESS','COMPLETED','REVIEWED')),"
+        "  note TEXT,"
+        "  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+        "  FOREIGN KEY(operator_user_id) REFERENCES users(id)"
+        ");"
+
+        "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);"
+        "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_orders_operator ON orders(operator_user_id);"
+        "CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);"
+        "CREATE INDEX IF NOT EXISTS idx_payment_txn_order_id ON payment_transactions(order_id);"
+        "CREATE INDEX IF NOT EXISTS idx_payment_txn_method ON payment_transactions(payment_method);"
+        "CREATE INDEX IF NOT EXISTS idx_payment_txn_created_at ON payment_transactions(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_change_txn_order_id ON change_transactions(order_id);"
+        "CREATE INDEX IF NOT EXISTS idx_change_txn_status ON change_transactions(status);"
+        "CREATE INDEX IF NOT EXISTS idx_change_txn_created_at ON change_transactions(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_cash_drawer_movements_denom ON cash_drawer_movements(denomination);"
+        "CREATE INDEX IF NOT EXISTS idx_cash_drawer_movements_created_at ON cash_drawer_movements(created_at);"
+        "CREATE INDEX IF NOT EXISTS idx_shift_settlements_operator ON shift_settlements(operator_user_id);"
+        "CREATE INDEX IF NOT EXISTS idx_shift_settlements_created_at ON shift_settlements(created_at);"
+
         "INSERT OR IGNORE INTO products (sku, name, unit, stock_quantity) VALUES "
-        "('SEED-WATER-550', '系统示例矿泉水550ml', '瓶', 50);";
+        "('SEED-WATER-550', '系统示例矿泉水550ml', '瓶', 50);"
+
+        "INSERT OR IGNORE INTO cash_drawer (denomination, denomination_value_cents, quantity, total_value_cents, coin_type) VALUES "
+        "('0.01', 1, 100, 100, 'COIN'),"
+        "('0.05', 5, 100, 500, 'COIN'),"
+        "('0.10', 10, 100, 1000, 'COIN'),"
+        "('0.50', 50, 100, 5000, 'COIN'),"
+        "('1.00', 100, 100, 10000, 'COIN'),"
+        "('5.00', 500, 20, 10000, 'BILL'),"
+        "('10.00', 1000, 20, 20000, 'BILL'),"
+        "('20.00', 2000, 10, 20000, 'BILL'),"
+        "('50.00', 5000, 5, 25000, 'BILL'),"
+        "('100.00', 10000, 5, 50000, 'BILL');";
 
     if (db_exec(schema_sql) != 0) {
         return -1;
@@ -1743,6 +1886,1816 @@ static enum MHD_Result handle_movements(struct MHD_Connection *connection) {
     return respond_success(connection, MHD_HTTP_OK, items);
 }
 
+static void generate_order_no(char *out, size_t out_size) {
+    time_t t = now_epoch();
+    struct tm tm_info;
+    localtime_r(&t, &tm_info);
+    char time_part[32];
+    strftime(time_part, sizeof(time_part), "%Y%m%d%H%M%S", &tm_info);
+    unsigned int rand_part = (unsigned int)randombytes_random();
+    snprintf(out, out_size, "ORD%s%06u", time_part, rand_part % 1000000);
+}
+
+static void generate_txn_no(const char *prefix, char *out, size_t out_size) {
+    time_t t = now_epoch();
+    struct tm tm_info;
+    localtime_r(&t, &tm_info);
+    char time_part[32];
+    strftime(time_part, sizeof(time_part), "%Y%m%d%H%M%S", &tm_info);
+    unsigned int rand_part = (unsigned int)randombytes_random();
+    snprintf(out, out_size, "%s%s%06u", prefix, time_part, rand_part % 1000000);
+}
+
+static int get_product_by_sku(const char *sku, int *out_id, int *out_price,
+                              int *out_stock, char *out_name, size_t name_size) {
+    sqlite3_stmt *stmt = NULL;
+    const char *sql = "SELECT id, name, stock_quantity FROM products WHERE sku = ? LIMIT 1;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_text(stmt, 1, sku, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+    *out_id = sqlite3_column_int(stmt, 0);
+    const char *name = (const char *)sqlite3_column_text(stmt, 1);
+    snprintf(out_name, name_size, "%s", name ? name : "");
+    *out_stock = sqlite3_column_int(stmt, 2);
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static int get_product_price(int product_id, int *out_price) {
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT unit_price_cents FROM stock_movements "
+        "WHERE product_id = ? AND movement_type = 'IN' "
+        "ORDER BY id DESC LIMIT 1;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_int(stmt, 1, product_id);
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        *out_price = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+        return 0;
+    }
+    sqlite3_finalize(stmt);
+    return -1;
+}
+
+typedef struct {
+    int product_id;
+    char product_name[128];
+    int quantity;
+    int unit_price_cents;
+    int subtotal_cents;
+} OrderItemInput;
+
+static enum MHD_Result handle_create_order(struct MHD_Connection *connection,
+                                           ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    json_t *items_arr = json_object_get(body, "items");
+    if (!json_is_array(items_arr) || json_array_size(items_arr) == 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "items 必须是非空数组");
+    }
+
+    size_t item_count = json_array_size(items_arr);
+    if (item_count > 100) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "订单项数量不能超过100");
+    }
+
+    OrderItemInput *items = (OrderItemInput *)calloc(item_count, sizeof(OrderItemInput));
+    if (items == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "INTERNAL_ERROR", "内存分配失败");
+    }
+
+    int total_amount = 0;
+    int parse_ok = 1;
+
+    for (size_t i = 0; i < item_count; ++i) {
+        json_t *item = json_array_get(items_arr, i);
+        const char *sku = json_string_value(json_object_get(item, "sku"));
+        if (sku == NULL || *sku == '\0') {
+            parse_ok = 0;
+            break;
+        }
+
+        json_t *qty_j = json_object_get(item, "quantity");
+        if (!json_is_integer(qty_j)) {
+            parse_ok = 0;
+            break;
+        }
+        int qty = (int)json_integer_value(qty_j);
+        if (qty <= 0 || qty > 10000) {
+            parse_ok = 0;
+            break;
+        }
+
+        int product_id = 0;
+        int stock = 0;
+        if (get_product_by_sku(sku, &product_id, &items[i].unit_price_cents,
+                               &stock, items[i].product_name,
+                               sizeof(items[i].product_name)) != 0) {
+            parse_ok = 0;
+            snprintf(err, sizeof(err), "商品不存在: %s", sku);
+            break;
+        }
+
+        if (stock < qty) {
+            parse_ok = 0;
+            snprintf(err, sizeof(err), "商品库存不足: %s", sku);
+            break;
+        }
+
+        json_t *price_j = json_object_get(item, "unit_price_cents");
+        if (json_is_integer(price_j)) {
+            items[i].unit_price_cents = (int)json_integer_value(price_j);
+        }
+        if (items[i].unit_price_cents < 0) {
+            parse_ok = 0;
+            break;
+        }
+
+        items[i].product_id = product_id;
+        items[i].quantity = qty;
+        items[i].subtotal_cents = items[i].unit_price_cents * qty;
+        total_amount += items[i].subtotal_cents;
+    }
+
+    if (!parse_ok) {
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT", err);
+    }
+
+    const char *note = optional_string_field(body, "note", 512);
+    if (note == NULL) {
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "note 需为字符串且不超过512字符");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    int has_auth = authenticate_request(connection, &user, token_hash);
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    char order_no[64];
+    generate_order_no(order_no, sizeof(order_no));
+
+    sqlite3_stmt *stmt = NULL;
+    const char *order_sql =
+        "INSERT INTO orders (order_no, total_amount_cents, paid_amount_cents, "
+        "change_amount_cents, status, operator_user_id, note) "
+        "VALUES (?, ?, 0, 0, 'PENDING', ?, ?);";
+    if (sqlite3_prepare_v2(g_db, order_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "创建订单预编译失败");
+    }
+    sqlite3_bind_text(stmt, 1, order_no, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, total_amount);
+    if (has_auth) {
+        sqlite3_bind_int(stmt, 3, user.user_id);
+    } else {
+        sqlite3_bind_null(stmt, 3);
+    }
+    sqlite3_bind_text(stmt, 4, note, -1, SQLITE_TRANSIENT);
+
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "创建订单失败");
+    }
+
+    int order_id = (int)sqlite3_last_insert_rowid(g_db);
+
+    const char *item_sql =
+        "INSERT INTO order_items (order_id, product_id, product_name, quantity, "
+        "unit_price_cents, subtotal_cents) VALUES (?, ?, ?, ?, ?, ?);";
+    if (sqlite3_prepare_v2(g_db, item_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "订单项预编译失败");
+    }
+
+    for (size_t i = 0; i < item_count; ++i) {
+        sqlite3_bind_int(stmt, 1, order_id);
+        sqlite3_bind_int(stmt, 2, items[i].product_id);
+        sqlite3_bind_text(stmt, 3, items[i].product_name, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 4, items[i].quantity);
+        sqlite3_bind_int(stmt, 5, items[i].unit_price_cents);
+        sqlite3_bind_int(stmt, 6, items[i].subtotal_cents);
+        rc = sqlite3_step(stmt);
+        if (rc != SQLITE_DONE) {
+            break;
+        }
+        sqlite3_reset(stmt);
+    }
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "创建订单项失败");
+    }
+
+    if (commit_transaction() != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        free(items);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交订单事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    free(items);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "order_id", json_integer(order_id));
+    json_object_set_new(data, "order_no", json_string(order_no));
+    json_object_set_new(data, "total_amount_cents", json_integer(total_amount));
+    json_object_set_new(data, "status", json_string("PENDING"));
+    return respond_success(connection, MHD_HTTP_CREATED, data);
+}
+
+static int get_order_by_id(int order_id, int *out_total, int *out_paid,
+                           int *out_change, char *out_status,
+                           size_t status_size, char *out_payment_method,
+                           size_t method_size) {
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT total_amount_cents, paid_amount_cents, change_amount_cents, "
+        "status, payment_method FROM orders WHERE id = ? LIMIT 1;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return -1;
+    }
+    *out_total = sqlite3_column_int(stmt, 0);
+    *out_paid = sqlite3_column_int(stmt, 1);
+    *out_change = sqlite3_column_int(stmt, 2);
+    const char *st = (const char *)sqlite3_column_text(stmt, 3);
+    snprintf(out_status, status_size, "%s", st ? st : "");
+    const char *pm = (const char *)sqlite3_column_text(stmt, 4);
+    snprintf(out_payment_method, method_size, "%s", pm ? pm : "");
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
+static enum MHD_Result handle_payment(struct MHD_Connection *connection,
+                                      ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    int order_id = 0;
+    if (parse_int_field(body, "order_id", 1, INT_MAX, &order_id) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "order_id 必填且为正整数");
+    }
+
+    const char *payment_method = NULL;
+    if (require_string_field(body, "payment_method", 16, &payment_method) != 0 ||
+        (strcmp(payment_method, "COIN") != 0 &&
+         strcmp(payment_method, "BILL") != 0 &&
+         strcmp(payment_method, "QR_CODE") != 0)) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "payment_method 必须是 COIN/BILL/QR_CODE");
+    }
+
+    int amount = 0;
+    if (parse_int_field(body, "amount_cents", 1, 100000000, &amount) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "amount_cents 必填且为正整数");
+    }
+
+    const char *denomination = optional_string_field(body, "denomination", 32);
+    if (denomination == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "denomination 需为字符串且不超过32字符");
+    }
+
+    const char *external_ref = optional_string_field(body, "external_ref", 128);
+    if (external_ref == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "external_ref 需为字符串且不超过128字符");
+    }
+
+    const char *note = optional_string_field(body, "note", 256);
+    if (note == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "note 需为字符串且不超过256字符");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    int has_auth = authenticate_request(connection, &user, token_hash);
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    int total_amount = 0;
+    int paid_amount = 0;
+    int change_amount = 0;
+    char status[32] = {0};
+    char curr_payment_method[32] = {0};
+
+    if (get_order_by_id(order_id, &total_amount, &paid_amount, &change_amount,
+                        status, sizeof(status), curr_payment_method,
+                        sizeof(curr_payment_method)) != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_NOT_FOUND, "NOT_FOUND",
+                            "订单不存在");
+    }
+
+    if (strcmp(status, "PENDING") != 0 && strcmp(status, "PAID") != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_CONFLICT, "INVALID_STATUS",
+                            "订单状态不允许支付");
+    }
+
+    if (paid_amount >= total_amount) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_CONFLICT, "ALREADY_PAID",
+                            "订单已足额支付");
+    }
+
+    int remaining = total_amount - paid_amount;
+    int actual_pay = (amount > remaining) ? remaining : amount;
+
+    char txn_no[64];
+    generate_txn_no("PAY", txn_no, sizeof(txn_no));
+
+    sqlite3_stmt *stmt = NULL;
+    const char *pay_sql =
+        "INSERT INTO payment_transactions "
+        "(order_id, txn_no, payment_method, amount_cents, denomination, "
+        " status, external_ref, operator_user_id) "
+        "VALUES (?, ?, ?, ?, ?, 'SUCCESS', ?, ?);";
+    if (sqlite3_prepare_v2(g_db, pay_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "支付流水预编译失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    sqlite3_bind_text(stmt, 2, txn_no, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, payment_method, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 4, actual_pay);
+    sqlite3_bind_text(stmt, 5, denomination, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 6, external_ref, -1, SQLITE_TRANSIENT);
+    if (has_auth) {
+        sqlite3_bind_int(stmt, 7, user.user_id);
+    } else {
+        sqlite3_bind_null(stmt, 7);
+    }
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "记录支付流水失败");
+    }
+
+    int new_paid = paid_amount + actual_pay;
+    int new_change = (new_paid > total_amount) ? (new_paid - total_amount) : 0;
+    char new_status[32] = {0};
+
+    if (new_paid >= total_amount) {
+        if (new_change > 0) {
+            snprintf(new_status, sizeof(new_status), "CHANGE_PENDING");
+        } else {
+            snprintf(new_status, sizeof(new_status), "COMPLETED");
+        }
+    } else {
+        snprintf(new_status, sizeof(new_status), "PAID");
+    }
+
+    char new_payment_method[32] = {0};
+    if (curr_payment_method[0] == '\0') {
+        snprintf(new_payment_method, sizeof(new_payment_method), "%s", payment_method);
+    } else if (strcmp(curr_payment_method, payment_method) != 0) {
+        snprintf(new_payment_method, sizeof(new_payment_method), "MIXED");
+    } else {
+        snprintf(new_payment_method, sizeof(new_payment_method), "%s", curr_payment_method);
+    }
+
+    const char *upd_sql =
+        "UPDATE orders SET paid_amount_cents = ?, change_amount_cents = ?, "
+        "status = ?, payment_method = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?;";
+    if (sqlite3_prepare_v2(g_db, upd_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单预编译失败");
+    }
+    sqlite3_bind_int(stmt, 1, new_paid);
+    sqlite3_bind_int(stmt, 2, new_change);
+    sqlite3_bind_text(stmt, 3, new_status, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, new_payment_method, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 5, order_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单失败");
+    }
+
+    if (commit_transaction() != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交支付事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "order_id", json_integer(order_id));
+    json_object_set_new(data, "payment_txn_no", json_string(txn_no));
+    json_object_set_new(data, "payment_method", json_string(payment_method));
+    json_object_set_new(data, "paid_amount_cents", json_integer(actual_pay));
+    json_object_set_new(data, "total_paid_cents", json_integer(new_paid));
+    json_object_set_new(data, "change_amount_cents", json_integer(new_change));
+    json_object_set_new(data, "order_status", json_string(new_status));
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+typedef struct {
+    char denomination[32];
+    int value_cents;
+    int quantity;
+    int coin_type;
+} DenominationInfo;
+
+static int load_all_denominations(DenominationInfo *out, int max_count,
+                                  int *out_count) {
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT denomination, denomination_value_cents, quantity, coin_type "
+        "FROM cash_drawer ORDER BY denomination_value_cents DESC;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return -1;
+    }
+    int count = 0;
+    int rc;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW && count < max_count) {
+        snprintf(out[count].denomination, sizeof(out[count].denomination),
+                 "%s", (const char *)sqlite3_column_text(stmt, 0));
+        out[count].value_cents = sqlite3_column_int(stmt, 1);
+        out[count].quantity = sqlite3_column_int(stmt, 2);
+        const char *ct = (const char *)sqlite3_column_text(stmt, 3);
+        out[count].coin_type = (ct && strcmp(ct, "COIN") == 0) ? 0 : 1;
+        count++;
+    }
+    sqlite3_finalize(stmt);
+    *out_count = count;
+    return (rc == SQLITE_DONE || rc == SQLITE_ROW) ? 0 : -1;
+}
+
+typedef struct {
+    char denomination[32];
+    int value_cents;
+    int dispense_count;
+} ChangePlanItem;
+
+static int calculate_change(int amount_cents, DenominationInfo *denoms,
+                            int denom_count, ChangePlanItem *out_plan,
+                            int max_plan_items, int *out_plan_count,
+                            int *out_actual_total) {
+    int remaining = amount_cents;
+    int plan_count = 0;
+    int actual_total = 0;
+
+    for (int i = 0; i < denom_count && remaining > 0 && plan_count < max_plan_items; i++) {
+        if (denoms[i].quantity <= 0) continue;
+        if (denoms[i].value_cents > remaining) continue;
+
+        int max_need = remaining / denoms[i].value_cents;
+        int can_dispense = (max_need < denoms[i].quantity) ? max_need : denoms[i].quantity;
+
+        if (can_dispense > 0) {
+            snprintf(out_plan[plan_count].denomination,
+                     sizeof(out_plan[plan_count].denomination),
+                     "%s", denoms[i].denomination);
+            out_plan[plan_count].value_cents = denoms[i].value_cents;
+            out_plan[plan_count].dispense_count = can_dispense;
+            actual_total += can_dispense * denoms[i].value_cents;
+            remaining -= can_dispense * denoms[i].value_cents;
+            plan_count++;
+        }
+    }
+
+    *out_plan_count = plan_count;
+    *out_actual_total = actual_total;
+    return (remaining == 0) ? 0 : -1;
+}
+
+static int update_cash_drawer_for_change(ChangePlanItem *plan, int plan_count,
+                                         int order_id, int change_txn_id,
+                                         int operator_id) {
+    for (int i = 0; i < plan_count; i++) {
+        sqlite3_stmt *stmt = NULL;
+        const char *sel_sql =
+            "SELECT quantity, total_value_cents FROM cash_drawer "
+            "WHERE denomination = ?;";
+        if (sqlite3_prepare_v2(g_db, sel_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            return -1;
+        }
+        sqlite3_bind_text(stmt, 1, plan[i].denomination, -1, SQLITE_TRANSIENT);
+        int rc = sqlite3_step(stmt);
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            return -1;
+        }
+        int qty_before = sqlite3_column_int(stmt, 0);
+        int total_before = sqlite3_column_int(stmt, 1);
+        sqlite3_finalize(stmt);
+
+        int qty_after = qty_before - plan[i].dispense_count;
+        int value_change = -plan[i].dispense_count * plan[i].value_cents;
+        int total_after = total_before + value_change;
+
+        const char *upd_sql =
+            "UPDATE cash_drawer SET quantity = ?, total_value_cents = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE denomination = ?;";
+        if (sqlite3_prepare_v2(g_db, upd_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            return -1;
+        }
+        sqlite3_bind_int(stmt, 1, qty_after);
+        sqlite3_bind_int(stmt, 2, total_after);
+        sqlite3_bind_text(stmt, 3, plan[i].denomination, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        if (rc != SQLITE_DONE) {
+            return -1;
+        }
+
+        const char *mv_sql =
+            "INSERT INTO cash_drawer_movements "
+            "(denomination, movement_type, quantity_before, quantity_change, "
+            " quantity_after, value_change_cents, order_id, change_txn_id, "
+            " operator_user_id, note) "
+            "VALUES (?, 'DISPENSE', ?, ?, ?, ?, ?, ?, ?, '找零支出');";
+        if (sqlite3_prepare_v2(g_db, mv_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            return -1;
+        }
+        sqlite3_bind_text(stmt, 1, plan[i].denomination, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, qty_before);
+        sqlite3_bind_int(stmt, 3, -plan[i].dispense_count);
+        sqlite3_bind_int(stmt, 4, qty_after);
+        sqlite3_bind_int(stmt, 5, value_change);
+        if (order_id > 0) {
+            sqlite3_bind_int(stmt, 6, order_id);
+        } else {
+            sqlite3_bind_null(stmt, 6);
+        }
+        if (change_txn_id > 0) {
+            sqlite3_bind_int(stmt, 7, change_txn_id);
+        } else {
+            sqlite3_bind_null(stmt, 7);
+        }
+        if (operator_id > 0) {
+            sqlite3_bind_int(stmt, 8, operator_id);
+        } else {
+            sqlite3_bind_null(stmt, 8);
+        }
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        if (rc != SQLITE_DONE) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static char *build_denom_breakdown(ChangePlanItem *plan, int plan_count) {
+    size_t buf_size = 512;
+    char *buf = (char *)malloc(buf_size);
+    if (buf == NULL) return NULL;
+    buf[0] = '\0';
+    size_t pos = 0;
+    for (int i = 0; i < plan_count; i++) {
+        int n = snprintf(buf + pos, buf_size - pos, "%s:%d%s",
+                         plan[i].denomination, plan[i].dispense_count,
+                         (i < plan_count - 1) ? "," : "");
+        if (n < 0 || (size_t)n >= buf_size - pos) break;
+        pos += (size_t)n;
+    }
+    return buf;
+}
+
+static enum MHD_Result handle_dispense_change(struct MHD_Connection *connection,
+                                              ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    int order_id = 0;
+    if (parse_int_field(body, "order_id", 1, INT_MAX, &order_id) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "order_id 必填且为正整数");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    int has_auth = authenticate_request(connection, &user, token_hash);
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    int total_amount = 0;
+    int paid_amount = 0;
+    int change_amount = 0;
+    char status[32] = {0};
+    char payment_method[32] = {0};
+
+    if (get_order_by_id(order_id, &total_amount, &paid_amount, &change_amount,
+                        status, sizeof(status), payment_method,
+                        sizeof(payment_method)) != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_NOT_FOUND, "NOT_FOUND",
+                            "订单不存在");
+    }
+
+    if (strcmp(status, "CHANGE_PENDING") != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_CONFLICT, "INVALID_STATUS",
+                            "订单状态不需要找零");
+    }
+
+    if (change_amount <= 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "NO_CHANGE",
+                            "找零金额为0");
+    }
+
+    char txn_no[64];
+    generate_txn_no("CHG", txn_no, sizeof(txn_no));
+
+    DenominationInfo denoms[32];
+    int denom_count = 0;
+    if (load_all_denominations(denoms, 32, &denom_count) != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "加载找零盒数据失败");
+    }
+
+    ChangePlanItem plan[32];
+    int plan_count = 0;
+    int actual_total = 0;
+    int can_full_change = (calculate_change(change_amount, denoms, denom_count,
+                                            plan, 32, &plan_count,
+                                            &actual_total) == 0);
+
+    char *breakdown = build_denom_breakdown(plan, plan_count);
+    const char *change_status = NULL;
+    const char *failure_reason = NULL;
+    const char *order_status = NULL;
+    const char *order_failure_reason = NULL;
+
+    if (can_full_change) {
+        change_status = "SUCCESS";
+        order_status = "COMPLETED";
+    } else if (actual_total > 0) {
+        change_status = "PARTIAL";
+        failure_reason = "INSUFFICIENT_CHANGE";
+        order_status = "CHANGE_FAILED";
+        order_failure_reason = "INSUFFICIENT_CHANGE";
+    } else {
+        change_status = "FAILED";
+        failure_reason = "INSUFFICIENT_CHANGE";
+        order_status = "CHANGE_FAILED";
+        order_failure_reason = "INSUFFICIENT_CHANGE";
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    const char *ins_sql =
+        "INSERT INTO change_transactions "
+        "(order_id, txn_no, request_amount_cents, actual_amount_cents, "
+        " status, failure_reason, denomination_breakdown, operator_user_id, note) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, '自动找零');";
+    if (sqlite3_prepare_v2(g_db, ins_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        free(breakdown);
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "找零流水预编译失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    sqlite3_bind_text(stmt, 2, txn_no, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, change_amount);
+    sqlite3_bind_int(stmt, 4, actual_total);
+    sqlite3_bind_text(stmt, 5, change_status, -1, SQLITE_TRANSIENT);
+    if (failure_reason) {
+        sqlite3_bind_text(stmt, 6, failure_reason, -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 6);
+    }
+    if (breakdown) {
+        sqlite3_bind_text(stmt, 7, breakdown, -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 7);
+    }
+    if (has_auth) {
+        sqlite3_bind_int(stmt, 8, user.user_id);
+    } else {
+        sqlite3_bind_null(stmt, 8);
+    }
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        free(breakdown);
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "记录找零流水失败");
+    }
+
+    int change_txn_id = (int)sqlite3_last_insert_rowid(g_db);
+
+    if (actual_total > 0) {
+        if (update_cash_drawer_for_change(plan, plan_count, order_id,
+                                          change_txn_id,
+                                          has_auth ? user.user_id : 0) != 0) {
+            free(breakdown);
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "更新找零盒失败");
+        }
+    }
+
+    const char *upd_sql =
+        "UPDATE orders SET status = ?, change_failure_reason = ?, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ?;";
+    if (strcmp(change_status, "SUCCESS") == 0) {
+        upd_sql =
+            "UPDATE orders SET status = ?, change_failure_reason = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?;";
+    }
+    if (sqlite3_prepare_v2(g_db, upd_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        free(breakdown);
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单预编译失败");
+    }
+    int idx = 1;
+    sqlite3_bind_text(stmt, idx++, order_status, -1, SQLITE_TRANSIENT);
+    if (strcmp(change_status, "SUCCESS") != 0) {
+        sqlite3_bind_text(stmt, idx++, order_failure_reason, -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int(stmt, idx, order_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        free(breakdown);
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单失败");
+    }
+
+    if (commit_transaction() != 0) {
+        free(breakdown);
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交找零事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "order_id", json_integer(order_id));
+    json_object_set_new(data, "change_txn_no", json_string(txn_no));
+    json_object_set_new(data, "request_amount_cents", json_integer(change_amount));
+    json_object_set_new(data, "actual_amount_cents", json_integer(actual_total));
+    json_object_set_new(data, "status", json_string(change_status));
+    if (failure_reason) {
+        json_object_set_new(data, "failure_reason", json_string(failure_reason));
+    }
+    if (breakdown) {
+        json_object_set_new(data, "denomination_breakdown", json_string(breakdown));
+    }
+    free(breakdown);
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+static enum MHD_Result handle_change_exception(struct MHD_Connection *connection,
+                                               ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    int order_id = 0;
+    if (parse_int_field(body, "order_id", 1, INT_MAX, &order_id) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "order_id 必填且为正整数");
+    }
+
+    const char *exception_type = NULL;
+    if (require_string_field(body, "exception_type", 32, &exception_type) != 0 ||
+        (strcmp(exception_type, "COIN_JAM") != 0 &&
+         strcmp(exception_type, "USER_CANCELLED") != 0 &&
+         strcmp(exception_type, "MANUAL_REFUND") != 0)) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "exception_type 必须是 COIN_JAM/USER_CANCELLED/MANUAL_REFUND");
+    }
+
+    const char *note = optional_string_field(body, "note", 512);
+    if (note == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "note 需为字符串且不超过512字符");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    int has_auth = authenticate_request(connection, &user, token_hash);
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    int total_amount = 0;
+    int paid_amount = 0;
+    int change_amount = 0;
+    char status[32] = {0};
+    char payment_method[32] = {0};
+
+    if (get_order_by_id(order_id, &total_amount, &paid_amount, &change_amount,
+                        status, sizeof(status), payment_method,
+                        sizeof(payment_method)) != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_NOT_FOUND, "NOT_FOUND",
+                            "订单不存在");
+    }
+
+    if (strcmp(status, "CHANGE_PENDING") != 0 &&
+        strcmp(status, "CHANGE_FAILED") != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_CONFLICT, "INVALID_STATUS",
+                            "当前订单状态不允许此操作");
+    }
+
+    char txn_no[64];
+    generate_txn_no("CHG", txn_no, sizeof(txn_no));
+
+    const char *txn_status = NULL;
+    const char *order_status = NULL;
+
+    if (strcmp(exception_type, "COIN_JAM") == 0) {
+        txn_status = "FAILED";
+        order_status = "CHANGE_FAILED";
+    } else if (strcmp(exception_type, "USER_CANCELLED") == 0) {
+        txn_status = "CANCELLED";
+        order_status = "CHANGE_FAILED";
+    } else if (strcmp(exception_type, "MANUAL_REFUND") == 0) {
+        txn_status = "MANUAL_REFUND";
+        order_status = "COMPLETED";
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    const char *ins_sql =
+        "INSERT INTO change_transactions "
+        "(order_id, txn_no, request_amount_cents, actual_amount_cents, "
+        " status, failure_reason, operator_user_id, note) "
+        "VALUES (?, ?, ?, 0, ?, ?, ?, ?);";
+    if (sqlite3_prepare_v2(g_db, ins_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "找零异常流水预编译失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    sqlite3_bind_text(stmt, 2, txn_no, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, change_amount);
+    sqlite3_bind_text(stmt, 4, txn_status, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 5, exception_type, -1, SQLITE_TRANSIENT);
+    if (has_auth) {
+        sqlite3_bind_int(stmt, 6, user.user_id);
+    } else {
+        sqlite3_bind_null(stmt, 6);
+    }
+    sqlite3_bind_text(stmt, 7, note, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "记录找零异常流水失败");
+    }
+
+    const char *upd_sql = NULL;
+    if (strcmp(exception_type, "MANUAL_REFUND") == 0) {
+        upd_sql =
+            "UPDATE orders SET status = ?, change_failure_reason = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?;";
+    } else {
+        upd_sql =
+            "UPDATE orders SET status = ?, change_failure_reason = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?;";
+    }
+    if (sqlite3_prepare_v2(g_db, upd_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单预编译失败");
+    }
+    sqlite3_bind_text(stmt, 1, order_status, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, exception_type, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 3, order_id);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "更新订单失败");
+    }
+
+    if (commit_transaction() != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "order_id", json_integer(order_id));
+    json_object_set_new(data, "change_txn_no", json_string(txn_no));
+    json_object_set_new(data, "exception_type", json_string(exception_type));
+    json_object_set_new(data, "order_status", json_string(order_status));
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+static enum MHD_Result handle_cash_drawer_status(struct MHD_Connection *connection,
+                                                 ConnectionInfo *ci) {
+    (void)ci;
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    if (!authenticate_request(connection, &user, token_hash)) {
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_UNAUTHORIZED, "UNAUTHORIZED",
+                            "需要登录");
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT denomination, denomination_value_cents, quantity, "
+        "total_value_cents, coin_type, updated_at "
+        "FROM cash_drawer ORDER BY denomination_value_cents ASC;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询找零盒失败");
+    }
+
+    json_t *items = json_array();
+    int total_cents = 0;
+    int rc = SQLITE_OK;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *item = json_object();
+        json_object_set_new(item, "denomination",
+                            json_string(safe_col_text(stmt, 0)));
+        json_object_set_new(item, "value_cents",
+                            json_integer(sqlite3_column_int(stmt, 1)));
+        json_object_set_new(item, "quantity",
+                            json_integer(sqlite3_column_int(stmt, 2)));
+        json_object_set_new(item, "total_value_cents",
+                            json_integer(sqlite3_column_int(stmt, 3)));
+        json_object_set_new(item, "coin_type",
+                            json_string(safe_col_text(stmt, 4)));
+        json_object_set_new(item, "updated_at",
+                            json_string(safe_col_text(stmt, 5)));
+        json_array_append_new(items, item);
+        total_cents += sqlite3_column_int(stmt, 3);
+    }
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_db_mutex);
+
+    if (rc != SQLITE_DONE) {
+        json_decref(items);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "读取找零盒数据失败");
+    }
+
+    json_t *data = json_object();
+    json_object_set_new(data, "total_value_cents", json_integer(total_cents));
+    json_object_set_new(data, "denominations", items);
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+static enum MHD_Result handle_cash_drawer_refill(struct MHD_Connection *connection,
+                                                  ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    json_t *items_arr = json_object_get(body, "items");
+    if (!json_is_array(items_arr) || json_array_size(items_arr) == 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "items 必须是非空数组");
+    }
+
+    const char *note = optional_string_field(body, "note", 256);
+    if (note == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "note 需为字符串且不超过256字符");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    if (!authenticate_request(connection, &user, token_hash)) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_UNAUTHORIZED, "UNAUTHORIZED",
+                            "需要登录");
+    }
+
+    if (!is_admin_role(&user)) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_FORBIDDEN, "FORBIDDEN",
+                            "仅管理员可补充找零盒");
+    }
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    size_t item_count = json_array_size(items_arr);
+    int total_added = 0;
+
+    for (size_t i = 0; i < item_count; ++i) {
+        json_t *item = json_array_get(items_arr, i);
+        const char *denom = json_string_value(json_object_get(item, "denomination"));
+        if (denom == NULL || *denom == '\0') {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                                "denomination 必填");
+        }
+
+        json_t *qty_j = json_object_get(item, "add_quantity");
+        if (!json_is_integer(qty_j)) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                                "add_quantity 必须是整数");
+        }
+        int add_qty = (int)json_integer_value(qty_j);
+        if (add_qty <= 0 || add_qty > 100000) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                                "add_quantity 必须在1-100000之间");
+        }
+
+        sqlite3_stmt *stmt = NULL;
+        const char *sel_sql =
+            "SELECT quantity, total_value_cents, denomination_value_cents "
+            "FROM cash_drawer WHERE denomination = ?;";
+        if (sqlite3_prepare_v2(g_db, sel_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "查询面额失败");
+        }
+        sqlite3_bind_text(stmt, 1, denom, -1, SQLITE_TRANSIENT);
+        int rc = sqlite3_step(stmt);
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_NOT_FOUND, "NOT_FOUND",
+                                "面额不存在");
+        }
+        int qty_before = sqlite3_column_int(stmt, 0);
+        int total_before = sqlite3_column_int(stmt, 1);
+        int value_each = sqlite3_column_int(stmt, 2);
+        sqlite3_finalize(stmt);
+
+        int qty_after = qty_before + add_qty;
+        int value_change = add_qty * value_each;
+        int total_after = total_before + value_change;
+        total_added += value_change;
+
+        const char *upd_sql =
+            "UPDATE cash_drawer SET quantity = ?, total_value_cents = ?, "
+            "updated_at = CURRENT_TIMESTAMP WHERE denomination = ?;";
+        if (sqlite3_prepare_v2(g_db, upd_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "更新找零盒失败");
+        }
+        sqlite3_bind_int(stmt, 1, qty_after);
+        sqlite3_bind_int(stmt, 2, total_after);
+        sqlite3_bind_text(stmt, 3, denom, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        if (rc != SQLITE_DONE) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "更新找零盒失败");
+        }
+
+        const char *mv_sql =
+            "INSERT INTO cash_drawer_movements "
+            "(denomination, movement_type, quantity_before, quantity_change, "
+            " quantity_after, value_change_cents, operator_user_id, note) "
+            "VALUES (?, 'REFILL', ?, ?, ?, ?, ?, ?);";
+        if (sqlite3_prepare_v2(g_db, mv_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "写入流水失败");
+        }
+        sqlite3_bind_text(stmt, 1, denom, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 2, qty_before);
+        sqlite3_bind_int(stmt, 3, add_qty);
+        sqlite3_bind_int(stmt, 4, qty_after);
+        sqlite3_bind_int(stmt, 5, value_change);
+        sqlite3_bind_int(stmt, 6, user.user_id);
+        sqlite3_bind_text(stmt, 7, note, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        if (rc != SQLITE_DONE) {
+            rollback_transaction();
+            pthread_mutex_unlock(&g_db_mutex);
+            json_decref(body);
+            return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                                "DB_ERROR", "写入流水失败");
+        }
+    }
+
+    if (commit_transaction() != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "total_added_cents", json_integer(total_added));
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+static enum MHD_Result handle_order_detail(struct MHD_Connection *connection,
+                                            ConnectionInfo *ci) {
+    (void)ci;
+    const char *id_s = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "id");
+    if (id_s == NULL || *id_s == '\0') {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "id 参数必填");
+    }
+    int order_id = atoi(id_s);
+    if (order_id <= 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "id 必须为正整数");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT o.id, o.order_no, o.total_amount_cents, o.paid_amount_cents, "
+        "o.change_amount_cents, o.status, o.payment_method, o.change_failure_reason, "
+        "o.note, o.created_at, o.updated_at, u.username "
+        "FROM orders o "
+        "LEFT JOIN users u ON u.id = o.operator_user_id "
+        "WHERE o.id = ? LIMIT 1;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询订单失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    int rc = sqlite3_step(stmt);
+    if (rc != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_NOT_FOUND, "NOT_FOUND",
+                            "订单不存在");
+    }
+
+    json_t *order = json_object();
+    json_object_set_new(order, "id", json_integer(sqlite3_column_int(stmt, 0)));
+    json_object_set_new(order, "order_no", json_string(safe_col_text(stmt, 1)));
+    json_object_set_new(order, "total_amount_cents",
+                        json_integer(sqlite3_column_int(stmt, 2)));
+    json_object_set_new(order, "paid_amount_cents",
+                        json_integer(sqlite3_column_int(stmt, 3)));
+    json_object_set_new(order, "change_amount_cents",
+                        json_integer(sqlite3_column_int(stmt, 4)));
+    json_object_set_new(order, "status", json_string(safe_col_text(stmt, 5)));
+    json_object_set_new(order, "payment_method",
+                        json_string(safe_col_text(stmt, 6)));
+    const char *fr = safe_col_text(stmt, 7);
+    if (fr && *fr) {
+        json_object_set_new(order, "change_failure_reason", json_string(fr));
+    }
+    json_object_set_new(order, "note", json_string(safe_col_text(stmt, 8)));
+    json_object_set_new(order, "created_at", json_string(safe_col_text(stmt, 9)));
+    json_object_set_new(order, "updated_at", json_string(safe_col_text(stmt, 10)));
+    json_object_set_new(order, "operator", json_string(safe_col_text(stmt, 11)));
+    sqlite3_finalize(stmt);
+
+    const char *item_sql =
+        "SELECT id, product_id, product_name, quantity, unit_price_cents, "
+        "subtotal_cents FROM order_items WHERE order_id = ? ORDER BY id ASC;";
+    if (sqlite3_prepare_v2(g_db, item_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        json_decref(order);
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询订单项失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    json_t *items = json_array();
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *it = json_object();
+        json_object_set_new(it, "id", json_integer(sqlite3_column_int(stmt, 0)));
+        json_object_set_new(it, "product_id",
+                            json_integer(sqlite3_column_int(stmt, 1)));
+        json_object_set_new(it, "product_name",
+                            json_string(safe_col_text(stmt, 2)));
+        json_object_set_new(it, "quantity",
+                            json_integer(sqlite3_column_int(stmt, 3)));
+        json_object_set_new(it, "unit_price_cents",
+                            json_integer(sqlite3_column_int(stmt, 4)));
+        json_object_set_new(it, "subtotal_cents",
+                            json_integer(sqlite3_column_int(stmt, 5)));
+        json_array_append_new(items, it);
+    }
+    sqlite3_finalize(stmt);
+    json_object_set_new(order, "items", items);
+
+    const char *pay_sql =
+        "SELECT id, txn_no, payment_method, amount_cents, denomination, "
+        "status, failure_reason, external_ref, created_at "
+        "FROM payment_transactions WHERE order_id = ? ORDER BY id ASC;";
+    if (sqlite3_prepare_v2(g_db, pay_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        json_decref(order);
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询支付流水失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    json_t *payments = json_array();
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *it = json_object();
+        json_object_set_new(it, "id", json_integer(sqlite3_column_int(stmt, 0)));
+        json_object_set_new(it, "txn_no",
+                            json_string(safe_col_text(stmt, 1)));
+        json_object_set_new(it, "payment_method",
+                            json_string(safe_col_text(stmt, 2)));
+        json_object_set_new(it, "amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 3)));
+        json_object_set_new(it, "denomination",
+                            json_string(safe_col_text(stmt, 4)));
+        json_object_set_new(it, "status",
+                            json_string(safe_col_text(stmt, 5)));
+        const char *pfr = safe_col_text(stmt, 6);
+        if (pfr && *pfr) {
+            json_object_set_new(it, "failure_reason", json_string(pfr));
+        }
+        json_object_set_new(it, "external_ref",
+                            json_string(safe_col_text(stmt, 7)));
+        json_object_set_new(it, "created_at",
+                            json_string(safe_col_text(stmt, 8)));
+        json_array_append_new(payments, it);
+    }
+    sqlite3_finalize(stmt);
+    json_object_set_new(order, "payment_transactions", payments);
+
+    const char *chg_sql =
+        "SELECT id, txn_no, request_amount_cents, actual_amount_cents, "
+        "status, failure_reason, denomination_breakdown, note, created_at "
+        "FROM change_transactions WHERE order_id = ? ORDER BY id ASC;";
+    if (sqlite3_prepare_v2(g_db, chg_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        json_decref(order);
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询找零流水失败");
+    }
+    sqlite3_bind_int(stmt, 1, order_id);
+    json_t *changes = json_array();
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *it = json_object();
+        json_object_set_new(it, "id", json_integer(sqlite3_column_int(stmt, 0)));
+        json_object_set_new(it, "txn_no",
+                            json_string(safe_col_text(stmt, 1)));
+        json_object_set_new(it, "request_amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 2)));
+        json_object_set_new(it, "actual_amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 3)));
+        json_object_set_new(it, "status",
+                            json_string(safe_col_text(stmt, 4)));
+        const char *cfr = safe_col_text(stmt, 5);
+        if (cfr && *cfr) {
+            json_object_set_new(it, "failure_reason", json_string(cfr));
+        }
+        json_object_set_new(it, "denomination_breakdown",
+                            json_string(safe_col_text(stmt, 6)));
+        json_object_set_new(it, "note", json_string(safe_col_text(stmt, 7)));
+        json_object_set_new(it, "created_at",
+                            json_string(safe_col_text(stmt, 8)));
+        json_array_append_new(changes, it);
+    }
+    sqlite3_finalize(stmt);
+    json_object_set_new(order, "change_transactions", changes);
+
+    pthread_mutex_unlock(&g_db_mutex);
+    return respond_success(connection, MHD_HTTP_OK, order);
+}
+
+static enum MHD_Result handle_order_list(struct MHD_Connection *connection,
+                                         ConnectionInfo *ci) {
+    (void)ci;
+    int limit = parse_limit_query(connection);
+
+    const char *status_filter =
+        MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "status");
+    int use_status = 0;
+    if (status_filter != NULL && *status_filter != '\0') {
+        use_status = 1;
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    int has_auth = authenticate_request(connection, &user, token_hash);
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql_all =
+        "SELECT o.id, o.order_no, o.total_amount_cents, o.paid_amount_cents, "
+        "o.change_amount_cents, o.status, o.payment_method, o.created_at, u.username "
+        "FROM orders o "
+        "LEFT JOIN users u ON u.id = o.operator_user_id "
+        "ORDER BY o.id DESC LIMIT ?;";
+    const char *sql_status =
+        "SELECT o.id, o.order_no, o.total_amount_cents, o.paid_amount_cents, "
+        "o.change_amount_cents, o.status, o.payment_method, o.created_at, u.username "
+        "FROM orders o "
+        "LEFT JOIN users u ON u.id = o.operator_user_id "
+        "WHERE o.status = ? "
+        "ORDER BY o.id DESC LIMIT ?;";
+
+    if (sqlite3_prepare_v2(g_db, use_status ? sql_status : sql_all, -1,
+                           &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&g_db_mutex);
+        (void)has_auth;
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询订单列表失败");
+    }
+    int idx = 1;
+    if (use_status) {
+        sqlite3_bind_text(stmt, idx++, status_filter, -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int(stmt, idx, limit);
+
+    json_t *items = json_array();
+    int rc = SQLITE_OK;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *it = json_object();
+        json_object_set_new(it, "id", json_integer(sqlite3_column_int(stmt, 0)));
+        json_object_set_new(it, "order_no", json_string(safe_col_text(stmt, 1)));
+        json_object_set_new(it, "total_amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 2)));
+        json_object_set_new(it, "paid_amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 3)));
+        json_object_set_new(it, "change_amount_cents",
+                            json_integer(sqlite3_column_int(stmt, 4)));
+        json_object_set_new(it, "status", json_string(safe_col_text(stmt, 5)));
+        json_object_set_new(it, "payment_method",
+                            json_string(safe_col_text(stmt, 6)));
+        json_object_set_new(it, "created_at",
+                            json_string(safe_col_text(stmt, 7)));
+        json_object_set_new(it, "operator", json_string(safe_col_text(stmt, 8)));
+        json_array_append_new(items, it);
+    }
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_db_mutex);
+
+    if (rc != SQLITE_DONE) {
+        json_decref(items);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "读取订单列表失败");
+    }
+    return respond_success(connection, MHD_HTTP_OK, items);
+}
+
+static enum MHD_Result handle_shift_settlement(struct MHD_Connection *connection,
+                                                ConnectionInfo *ci) {
+    char err[256];
+    json_t *body = NULL;
+    if (parse_json_body(ci, &body, err) != 0) {
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_JSON", err);
+    }
+
+    const char *start_time = NULL;
+    const char *end_time = NULL;
+    if (require_string_field(body, "start_time", 32, &start_time) != 0 ||
+        require_string_field(body, "end_time", 32, &end_time) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "start_time/end_time 必填");
+    }
+
+    int actual_cash = 0;
+    if (parse_int_field(body, "actual_cash_cents", 0, INT_MAX, &actual_cash) != 0) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "actual_cash_cents 必填且非负");
+    }
+
+    const char *note = optional_string_field(body, "note", 512);
+    if (note == NULL) {
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_BAD_REQUEST, "INVALID_INPUT",
+                            "note 需为字符串且不超过512字符");
+    }
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    if (!authenticate_request(connection, &user, token_hash)) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_UNAUTHORIZED, "UNAUTHORIZED",
+                            "需要登录");
+    }
+
+    if (begin_transaction() != 0) {
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "开启事务失败");
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sales_sql =
+        "SELECT COALESCE(SUM(total_amount_cents), 0), "
+        "COALESCE(SUM(change_amount_cents), 0), COUNT(*) "
+        "FROM orders "
+        "WHERE created_at >= ? AND created_at <= ? "
+        "AND status IN ('COMPLETED','CHANGE_FAILED','CHANGE_PENDING') "
+        "AND payment_method IN ('COIN','BILL','MIXED');";
+    if (sqlite3_prepare_v2(g_db, sales_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "统计销售数据失败");
+    }
+    sqlite3_bind_text(stmt, 1, start_time, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, end_time, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(stmt);
+    int total_sales = 0;
+    int total_change = 0;
+    int order_count = 0;
+    if (rc == SQLITE_ROW) {
+        total_sales = sqlite3_column_int(stmt, 0);
+        total_change = sqlite3_column_int(stmt, 1);
+        order_count = sqlite3_column_int(stmt, 2);
+    }
+    sqlite3_finalize(stmt);
+
+    const char *qr_sql =
+        "SELECT COALESCE(SUM(amount_cents), 0) "
+        "FROM payment_transactions "
+        "WHERE created_at >= ? AND created_at <= ? "
+        "AND payment_method = 'QR_CODE' AND status = 'SUCCESS';";
+    if (sqlite3_prepare_v2(g_db, qr_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "统计扫码支付失败");
+    }
+    sqlite3_bind_text(stmt, 1, start_time, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, end_time, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    int total_qr = 0;
+    if (rc == SQLITE_ROW) {
+        total_qr = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+
+    const char *fail_sql =
+        "SELECT COUNT(*) FROM change_transactions "
+        "WHERE created_at >= ? AND created_at <= ? "
+        "AND status IN ('FAILED','PARTIAL','CANCELLED','MANUAL_REFUND');";
+    if (sqlite3_prepare_v2(g_db, fail_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "统计找零失败次数失败");
+    }
+    sqlite3_bind_text(stmt, 1, start_time, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, end_time, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    int change_fail_count = 0;
+    if (rc == SQLITE_ROW) {
+        change_fail_count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+
+    int expected_cash = total_sales - total_change;
+    int difference = actual_cash - expected_cash;
+
+    char shift_no[64];
+    generate_txn_no("SHIFT", shift_no, sizeof(shift_no));
+
+    const char *ins_sql =
+        "INSERT INTO shift_settlements "
+        "(shift_no, operator_user_id, start_time, end_time, "
+        " expected_cash_cents, actual_cash_cents, difference_cents, "
+        " total_sales_cents, total_change_cents, total_qr_sales_cents, "
+        " order_count, change_failure_count, status, note) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COMPLETED', ?);";
+    if (sqlite3_prepare_v2(g_db, ins_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "盘点记录预编译失败");
+    }
+    sqlite3_bind_text(stmt, 1, shift_no, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, user.user_id);
+    sqlite3_bind_text(stmt, 3, start_time, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, end_time, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 5, expected_cash);
+    sqlite3_bind_int(stmt, 6, actual_cash);
+    sqlite3_bind_int(stmt, 7, difference);
+    sqlite3_bind_int(stmt, 8, total_sales);
+    sqlite3_bind_int(stmt, 9, total_change);
+    sqlite3_bind_int(stmt, 10, total_qr);
+    sqlite3_bind_int(stmt, 11, order_count);
+    sqlite3_bind_int(stmt, 12, change_fail_count);
+    sqlite3_bind_text(stmt, 13, note, -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "创建盘点记录失败");
+    }
+
+    int settlement_id = (int)sqlite3_last_insert_rowid(g_db);
+
+    if (commit_transaction() != 0) {
+        rollback_transaction();
+        pthread_mutex_unlock(&g_db_mutex);
+        json_decref(body);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "提交盘点事务失败");
+    }
+
+    pthread_mutex_unlock(&g_db_mutex);
+    json_decref(body);
+
+    json_t *data = json_object();
+    json_object_set_new(data, "settlement_id", json_integer(settlement_id));
+    json_object_set_new(data, "shift_no", json_string(shift_no));
+    json_object_set_new(data, "expected_cash_cents", json_integer(expected_cash));
+    json_object_set_new(data, "actual_cash_cents", json_integer(actual_cash));
+    json_object_set_new(data, "difference_cents", json_integer(difference));
+    json_object_set_new(data, "total_sales_cents", json_integer(total_sales));
+    json_object_set_new(data, "total_change_cents", json_integer(total_change));
+    json_object_set_new(data, "total_qr_sales_cents", json_integer(total_qr));
+    json_object_set_new(data, "order_count", json_integer(order_count));
+    json_object_set_new(data, "change_failure_count",
+                        json_integer(change_fail_count));
+    return respond_success(connection, MHD_HTTP_OK, data);
+}
+
+static enum MHD_Result handle_shift_list(struct MHD_Connection *connection,
+                                         ConnectionInfo *ci) {
+    (void)ci;
+    int limit = parse_limit_query(connection);
+
+    pthread_mutex_lock(&g_db_mutex);
+
+    AuthUser user;
+    char token_hash[TOKEN_HASH_HEX_LEN + 1] = {0};
+    if (!authenticate_request(connection, &user, token_hash)) {
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_UNAUTHORIZED, "UNAUTHORIZED",
+                            "需要登录");
+    }
+
+    sqlite3_stmt *stmt = NULL;
+    const char *sql =
+        "SELECT s.id, s.shift_no, u.username, s.start_time, s.end_time, "
+        "s.expected_cash_cents, s.actual_cash_cents, s.difference_cents, "
+        "s.total_sales_cents, s.total_change_cents, s.total_qr_sales_cents, "
+        "s.order_count, s.change_failure_count, s.status, s.created_at "
+        "FROM shift_settlements s "
+        "JOIN users u ON u.id = s.operator_user_id "
+        "ORDER BY s.id DESC LIMIT ?;";
+    if (sqlite3_prepare_v2(g_db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        pthread_mutex_unlock(&g_db_mutex);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "查询盘点记录失败");
+    }
+    sqlite3_bind_int(stmt, 1, limit);
+
+    json_t *items = json_array();
+    int rc = SQLITE_OK;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        json_t *it = json_object();
+        json_object_set_new(it, "id", json_integer(sqlite3_column_int(stmt, 0)));
+        json_object_set_new(it, "shift_no", json_string(safe_col_text(stmt, 1)));
+        json_object_set_new(it, "operator", json_string(safe_col_text(stmt, 2)));
+        json_object_set_new(it, "start_time", json_string(safe_col_text(stmt, 3)));
+        json_object_set_new(it, "end_time", json_string(safe_col_text(stmt, 4)));
+        json_object_set_new(it, "expected_cash_cents",
+                            json_integer(sqlite3_column_int(stmt, 5)));
+        json_object_set_new(it, "actual_cash_cents",
+                            json_integer(sqlite3_column_int(stmt, 6)));
+        json_object_set_new(it, "difference_cents",
+                            json_integer(sqlite3_column_int(stmt, 7)));
+        json_object_set_new(it, "total_sales_cents",
+                            json_integer(sqlite3_column_int(stmt, 8)));
+        json_object_set_new(it, "total_change_cents",
+                            json_integer(sqlite3_column_int(stmt, 9)));
+        json_object_set_new(it, "total_qr_sales_cents",
+                            json_integer(sqlite3_column_int(stmt, 10)));
+        json_object_set_new(it, "order_count",
+                            json_integer(sqlite3_column_int(stmt, 11)));
+        json_object_set_new(it, "change_failure_count",
+                            json_integer(sqlite3_column_int(stmt, 12)));
+        json_object_set_new(it, "status", json_string(safe_col_text(stmt, 13)));
+        json_object_set_new(it, "created_at",
+                            json_string(safe_col_text(stmt, 14)));
+        json_array_append_new(items, it);
+    }
+    sqlite3_finalize(stmt);
+    pthread_mutex_unlock(&g_db_mutex);
+
+    if (rc != SQLITE_DONE) {
+        json_decref(items);
+        return respond_error(connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
+                            "DB_ERROR", "读取盘点记录失败");
+    }
+    return respond_success(connection, MHD_HTTP_OK, items);
+}
+
 static enum MHD_Result route_health(struct MHD_Connection *connection,
                                     ConnectionInfo *ci) {
     (void)ci;
@@ -1804,6 +3757,56 @@ static enum MHD_Result route_movements(struct MHD_Connection *connection,
     return handle_movements(connection);
 }
 
+static enum MHD_Result route_create_order(struct MHD_Connection *connection,
+                                          ConnectionInfo *ci) {
+    return handle_create_order(connection, ci);
+}
+
+static enum MHD_Result route_payment(struct MHD_Connection *connection,
+                                     ConnectionInfo *ci) {
+    return handle_payment(connection, ci);
+}
+
+static enum MHD_Result route_dispense_change(struct MHD_Connection *connection,
+                                             ConnectionInfo *ci) {
+    return handle_dispense_change(connection, ci);
+}
+
+static enum MHD_Result route_change_exception(struct MHD_Connection *connection,
+                                              ConnectionInfo *ci) {
+    return handle_change_exception(connection, ci);
+}
+
+static enum MHD_Result route_cash_drawer_status(struct MHD_Connection *connection,
+                                                ConnectionInfo *ci) {
+    return handle_cash_drawer_status(connection, ci);
+}
+
+static enum MHD_Result route_cash_drawer_refill(struct MHD_Connection *connection,
+                                                 ConnectionInfo *ci) {
+    return handle_cash_drawer_refill(connection, ci);
+}
+
+static enum MHD_Result route_order_detail(struct MHD_Connection *connection,
+                                          ConnectionInfo *ci) {
+    return handle_order_detail(connection, ci);
+}
+
+static enum MHD_Result route_order_list(struct MHD_Connection *connection,
+                                        ConnectionInfo *ci) {
+    return handle_order_list(connection, ci);
+}
+
+static enum MHD_Result route_shift_settlement(struct MHD_Connection *connection,
+                                               ConnectionInfo *ci) {
+    return handle_shift_settlement(connection, ci);
+}
+
+static enum MHD_Result route_shift_list(struct MHD_Connection *connection,
+                                        ConnectionInfo *ci) {
+    return handle_shift_list(connection, ci);
+}
+
 static enum MHD_Result route_openapi_doc(struct MHD_Connection *connection,
                                          ConnectionInfo *ci);
 
@@ -1843,6 +3846,31 @@ static const ApiRoute g_api_routes[] = {
      "库存汇总与明细", "Inventory", 0, 0, 1},
     {MHD_HTTP_METHOD_GET, "/api/v1/movements", route_movements, "Movement History",
      "库存流水查询", "Inventory", 1, 0, 1},
+
+    {MHD_HTTP_METHOD_POST, "/api/v1/orders", route_create_order, "Create Order",
+     "创建订单", "Order", 1, 1, 1},
+    {MHD_HTTP_METHOD_GET, "/api/v1/orders", route_order_list, "List Orders",
+     "订单列表", "Order", 1, 0, 1},
+    {MHD_HTTP_METHOD_GET, "/api/v1/order", route_order_detail, "Order Detail",
+     "订单详情（含支付和找零流水）", "Order", 1, 0, 1},
+
+    {MHD_HTTP_METHOD_POST, "/api/v1/payment", route_payment, "Payment",
+     "支付（投币/纸币/扫码）", "Payment", 0, 1, 1},
+
+    {MHD_HTTP_METHOD_POST, "/api/v1/change/dispense", route_dispense_change,
+     "Dispense Change", "执行找零", "Change", 0, 1, 1},
+    {MHD_HTTP_METHOD_POST, "/api/v1/change/exception", route_change_exception,
+     "Change Exception", "找零异常处理（卡币/取消/人工补退）", "Change", 1, 1, 1},
+
+    {MHD_HTTP_METHOD_GET, "/api/v1/cash-drawer", route_cash_drawer_status,
+     "Cash Drawer Status", "找零盒状态", "CashDrawer", 1, 0, 1},
+    {MHD_HTTP_METHOD_POST, "/api/v1/cash-drawer/refill", route_cash_drawer_refill,
+     "Refill Cash Drawer", "补充找零盒", "CashDrawer", 1, 1, 1},
+
+    {MHD_HTTP_METHOD_POST, "/api/v1/shift/settlement", route_shift_settlement,
+     "Shift Settlement", "收班盘点", "Shift", 1, 1, 1},
+    {MHD_HTTP_METHOD_GET, "/api/v1/shift/settlements", route_shift_list,
+     "Shift Settlement List", "盘点记录列表", "Shift", 1, 0, 1},
     {MHD_HTTP_METHOD_GET, "/api/v1/openapi.json", route_openapi_doc,
      "OpenAPI Document", "自动生成的 OpenAPI 文档", "System", 0, 0, 1},
     {MHD_HTTP_METHOD_GET, "/docs", route_swagger_ui, "Swagger UI",

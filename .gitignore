@@ -1,8 +1,16 @@
 build/
+cmake-build-*/
+compile_commands.json
 *.o
 *.out
 *.log
 .DS_Store
+
+.env
+.env.local
+.env.*.local
+
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/user_key.b64
